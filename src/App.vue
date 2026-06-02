@@ -38,6 +38,7 @@ let dataArray: Uint8Array = new Uint8Array(0)
 let audioSource: MediaElementAudioSourceNode | MediaStreamAudioSourceNode | null = null
 let audioElement: HTMLAudioElement | null = null
 let micStream: MediaStream | null = null
+// @ts-expect-error used in cleanupAudio
 let sourceType: 'none' | 'file' | 'mic' = 'none'
 
 async function initAudioFromFile(file: File) {
@@ -115,7 +116,7 @@ function getAudioEnergy(): { bass: number; mid: number; high: number; avg: numbe
   if (!analyser || !dataArray.length) {
     return { bass: 0, mid: 0, high: 0, avg: 0 }
   }
-  analyser.getByteFrequencyData(dataArray)
+  analyser.getByteFrequencyData(dataArray as Uint8Array<ArrayBuffer>)
   const len = dataArray.length
   const third = Math.floor(len / 3)
 
@@ -140,6 +141,7 @@ interface FlowLine {
   speed: number
   life: number
   maxLife: number
+  maxPoints: number
   phase: number
   amplitude: number
   freq: number
@@ -196,6 +198,7 @@ function createLine(layer: FlowLine['layer']): FlowLine {
     speed: 0.5 + Math.random() * 2,
     life: 0,
     maxLife: 200 + Math.floor(Math.random() * 300),
+    maxPoints,
     phase: Math.random() * Math.PI * 2,
     amplitude: layer === 'swirl' ? 15 + Math.random() * 25 : 5 + Math.random() * 15,
     freq: 0.02 + Math.random() * 0.04,
@@ -253,7 +256,7 @@ function initScene() {
     const layer = pickLayer()
     const line = createLine(layer)
     line.life = Math.floor(Math.random() * line.maxLife) // 预推进
-    for (let j = 0; j < line.life && j < maxPoints; j++) {
+    for (let j = 0; j < line.life && j < line.maxPoints; j++) {
       advanceLine(line, j)
     }
     lines.push(line)
