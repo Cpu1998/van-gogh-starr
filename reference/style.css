@@ -1,0 +1,19 @@
+/*INSPIRED BY Hyper Glu's Going to Quasar.
+https://www.behance.net/gallery/45428489/Going-to-Quasar*/
+
+html, body {
+ height: 100%;
+ overflow: hidden;
+ background-color: #000;
+}
+
+body {
+ margin: 0;
+ display: flex;
+
+ /* This centers our sketch horizontally. */
+ justify-content: center;
+
+ /* This centers our sketch vertically. */
+ align-items: center;
+}

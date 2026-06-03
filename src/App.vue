@@ -12,7 +12,7 @@
     </div>
     <canvas ref="canvasRef"></canvas>
     <div class="info">
-      <span>✨ 梵高《星月夜》抽象线条 · Vue + Canvas</span>
+      <span>✨ 梵高星空 · 同心弧线律动</span>
     </div>
   </div>
 </template>
@@ -104,506 +104,303 @@ function getAudioEnergy() {
   return { bass, mid, high, avg: (bass + mid + high) / 3 }
 }
 
-// ==================== Abstract Line System ====================
+// ==================== Color Palette ====================
+// Deep purple → teal → warm yellow → white
+const C1 = { r: 20, g: 12, b: 53 }    // #140c35
+const C2 = { r: 29, g: 173, b: 164 }   // #1dada4
+const C3 = { r: 237, g: 246, b: 131 }   // #edf683
+const C4 = { r: 252, g: 253, b: 239 }   // #fcfdef
 
-// 所有元素统一为流动线条，通过运动场驱动
-
-interface FlowLine {
-  points: { x: number; y: number }[]
-  color: string
-  width: number
-  opacity: number
-  speed: number
-  life: number
-  maxLife: number
-  maxPoints: number
-  phase: number
-  amplitude: number
-  freq: number
-  element: 'sky' | 'swirl' | 'star' | 'village' | 'cypress' | 'moon'
-}
-
-// 色板 —— 全部用线条颜色
-const PALETTES = {
-  sky: ['#1a237e', '#283593', '#1565c0', '#0d47a1', '#01579b', '#1b3a5c', '#1e4880', '#c5cae9', '#9fa8da', '#7986cb'],
-  swirl: ['#42a5f5', '#64b5f6', '#90caf9', '#bbdefb', '#1565c0', '#1976d2', '#1e88e5', '#2196f3', '#ffee58', '#fff176', '#fdd835'],
-  star: ['#ffee58', '#fff176', '#fff9c4', '#ffffff', '#fdd835', '#f9a825', '#ffeb3b', '#ffc107'],
-  village: ['#1b5e20', '#2e7d32', '#388e3c', '#1a1a2e', '#16213e', '#0f3460', '#4a6741'],
-  cypress: ['#0d3b0d', '#1b5e20', '#2e7d32', '#0a2a0a', '#1a4a1a', '#0f3f0f'],
-  moon: ['#fff9c4', '#ffee58', '#fff176', '#fdd835', '#fffde7', '#ffe082'],
-}
-
-function pick(arr: string[]) { return arr[Math.floor(Math.random() * arr.length)] }
-
-let lines: FlowLine[] = []
-let time = 0
-
-// 漩涡中心
-const swirlCenters = [
-  { x: 0.25, y: 0.2, r: 0.12 },
-  { x: 0.65, y: 0.15, r: 0.08 },
-  { x: 0.45, y: 0.4, r: 0.15 },
-  { x: 0.8, y: 0.3, r: 0.07 },
-]
-
-// 星星位置（用辐射线簇表示）
-const starPositions = [
-  { x: 0.15, y: 0.12 }, { x: 0.3, y: 0.08 }, { x: 0.5, y: 0.05 },
-  { x: 0.7, y: 0.1 }, { x: 0.35, y: 0.25 }, { x: 0.6, y: 0.22 },
-  { x: 0.12, y: 0.35 }, { x: 0.85, y: 0.18 }, { x: 0.55, y: 0.35 },
-  { x: 0.25, y: 0.42 }, { x: 0.78, y: 0.38 }, { x: 0.42, y: 0.15 },
-]
-
-// 月亮位置
-const moonPos = { x: 0.85, y: 0.12 }
-
-function createLine(element: FlowLine['element']): FlowLine {
-  const maxPoints = 30 + Math.floor(Math.random() * 50)
-  let startX: number, startY: number, palette: string[]
-  let spd = 0.5 + Math.random() * 2
-  let amp = 5 + Math.random() * 15
-  let freq = 0.02 + Math.random() * 0.04
-  let w = 0.5 + Math.random() * 3
-  let op = 0.3 + Math.random() * 0.5
-
-  switch (element) {
-    case 'star': {
-      const star = starPositions[Math.floor(Math.random() * starPositions.length)]
-      // 从星星位置出发，向四周辐射
-      startX = star.x * width + (Math.random() - 0.5) * 20
-      startY = star.y * height + (Math.random() - 0.5) * 20
-      palette = PALETTES.star
-      w = 0.5 + Math.random() * 2
-      amp = 3 + Math.random() * 8
-      spd = 0.3 + Math.random() * 1.5
-      break
-    }
-    case 'swirl': {
-      // 在漩涡区域附近出发
-      const sc = swirlCenters[Math.floor(Math.random() * swirlCenters.length)]
-      const angle = Math.random() * Math.PI * 2
-      const dist = sc.r * width * (0.3 + Math.random() * 0.7)
-      startX = sc.x * width + Math.cos(angle) * dist
-      startY = sc.y * height + Math.sin(angle) * dist
-      palette = PALETTES.swirl
-      amp = 10 + Math.random() * 25
-      spd = 0.8 + Math.random() * 2.5
-      w = 0.5 + Math.random() * 2.5
-      break
-    }
-    case 'moon': {
-      // 月亮用同心弧线表示
-      const angle = Math.random() * Math.PI * 2
-      startX = moonPos.x * width + Math.cos(angle) * (20 + Math.random() * 40)
-      startY = moonPos.y * height + Math.sin(angle) * (20 + Math.random() * 40)
-      palette = PALETTES.moon
-      w = 0.5 + Math.random() * 1.5
-      spd = 0.2 + Math.random() * 0.8
-      amp = 3 + Math.random() * 6
-      break
-    }
-    case 'village': {
-      startX = Math.random() * width
-      startY = height * (0.7 + Math.random() * 0.25)
-      palette = PALETTES.village
-      spd = 0.3 + Math.random() * 1.2
-      amp = 2 + Math.random() * 8
-      w = 0.3 + Math.random() * 2
-      break
-    }
-    case 'cypress': {
-      // 柏树 —— 从底部向上的竖向流动线
-      startX = width * 0.88 + (Math.random() - 0.5) * 40
-      startY = height * (0.3 + Math.random() * 0.5)
-      palette = PALETTES.cypress
-      spd = 0.2 + Math.random() * 1
-      amp = 3 + Math.random() * 10
-      w = 0.5 + Math.random() * 2
-      op = 0.4 + Math.random() * 0.4
-      break
-    }
-    default: { // sky
-      startX = Math.random() * width
-      startY = Math.random() * height * 0.7
-      palette = PALETTES.sky
-      amp = 8 + Math.random() * 20
-      spd = 0.5 + Math.random() * 2
-      break
-    }
-  }
-
+function lerpColor(a: { r: number; g: number; b: number }, b2: { r: number; g: number; b: number }, t: number) {
+  const clamp = (v: number) => Math.max(0, Math.min(1, v))
+  t = clamp(t)
   return {
-    points: [{ x: startX, y: startY }],
-    color: pick(palette),
-    width: w,
-    opacity: op,
-    speed: spd,
-    life: 0,
-    maxLife: 150 + Math.floor(Math.random() * 250),
-    maxPoints,
-    phase: Math.random() * Math.PI * 2,
-    amplitude: amp,
-    freq,
-    element,
+    r: Math.round(a.r + (b2.r - a.r) * t),
+    g: Math.round(a.g + (b2.g - a.g) * t),
+    b: Math.round(a.b + (b2.b - a.b) * t),
   }
 }
 
-function pickElement(): FlowLine['element'] {
-  const r = Math.random()
-  if (r < 0.2) return 'sky'
-  if (r < 0.45) return 'swirl'
-  if (r < 0.6) return 'star'
-  if (r < 0.72) return 'village'
-  if (r < 0.8) return 'cypress'
-  if (r < 0.85) return 'moon'
-  return 'sky'
+function colorStr(c: { r: number; g: number; b: number }, alpha: number) {
+  return `rgba(${c.r},${c.g},${c.b},${alpha})`
 }
 
-// 线条运动 —— 每个元素有不同的流动场
-function advanceLine(line: FlowLine) {
-  const last = line.points[line.points.length - 1]
-  const energy = getAudioEnergy()
-  const audioBoost = 1 + energy.avg * 3
-  let dx = 0, dy = 0
-  const step = line.life
-
-  switch (line.element) {
-    case 'swirl': {
-      // 找最近的漩涡中心，沿切线旋转
-      let nearestIdx = 0, minDist = Infinity
-      for (let i = 0; i < swirlCenters.length; i++) {
-        const sc = swirlCenters[i]
-        const d = Math.hypot(last.x - sc.x * width, last.y - sc.y * height)
-        if (d < minDist) { minDist = d; nearestIdx = i }
-      }
-      const sc = swirlCenters[nearestIdx]
-      const cx = sc.x * width, cy = sc.y * height
-      const angle = Math.atan2(last.y - cy, last.x - cx)
-      const tangent = angle + Math.PI / 2
-      const pull = minDist > sc.r * width ? 0.015 : -0.008
-      dx = Math.cos(tangent) * line.speed * audioBoost + (cx - last.x) * pull
-      dy = Math.sin(tangent) * line.speed * audioBoost + (cy - last.y) * pull
-      dx += Math.sin(step * line.freq + line.phase) * line.amplitude * 0.04 * audioBoost
-      dy += Math.cos(step * line.freq + line.phase) * line.amplitude * 0.04 * audioBoost
-      break
-    }
-    case 'star': {
-      // 从最近的星星向外辐射
-      let nearestStar = starPositions[0], minD = Infinity
-      for (const s of starPositions) {
-        const d = Math.hypot(last.x - s.x * width, last.y - s.y * height)
-        if (d < minD) { minD = d; nearestStar = s }
-      }
-      const angle = Math.atan2(last.y - nearestStar.y * height, last.x - nearestStar.x * width)
-        + Math.sin(step * 0.03 + line.phase) * 0.4
-      dx = Math.cos(angle) * line.speed * 0.6 * audioBoost
-      dy = Math.sin(angle) * line.speed * 0.6 * audioBoost
-      dx += Math.sin(step * 0.08 + line.phase) * 0.3
-      dy += Math.cos(step * 0.08 + line.phase) * 0.3
-      break
-    }
-    case 'moon': {
-      // 绕月亮做弧线运动
-      const mx = moonPos.x * width, my = moonPos.y * height
-      const angle = Math.atan2(last.y - my, last.x - mx)
-      // 沿切线方向缓慢旋转 + 向外扩展
-      const tangent = angle + Math.PI / 2
-      dx = Math.cos(tangent) * line.speed * audioBoost * 0.5
-      dy = Math.sin(tangent) * line.speed * audioBoost * 0.5
-      // 微微向外
-      dx += Math.cos(angle) * 0.2
-      dy += Math.sin(angle) * 0.2
-      dx += Math.sin(step * 0.05 + line.phase) * 0.3
-      dy += Math.cos(step * 0.05 + line.phase) * 0.3
-      break
-    }
-    case 'village': {
-      // 水平方向为主，微起伏
-      dx = line.speed * audioBoost * 0.8 * (Math.random() > 0.5 ? 1 : -1)
-      dy = Math.sin(step * line.freq * 2 + line.phase) * 0.6 * audioBoost
-      break
-    }
-    case 'cypress': {
-      // 向上流动为主，微横向波动
-      dy = -line.speed * audioBoost
-      dx = Math.sin(step * line.freq + line.phase + time * 0.02) * line.amplitude * 0.08 * audioBoost
-      break
-    }
-    default: { // sky
-      dx = line.speed * 1.5 * audioBoost
-      dy = Math.sin(step * line.freq + line.phase + time * 0.008) * line.amplitude * 0.12 * audioBoost
-      break
-    }
-  }
-
-  line.points.push({ x: last.x + dx, y: last.y + dy })
-  if (line.points.length > line.maxPoints) line.points.shift()
+function paletteColor(ratio: number, jitter: number = 0): { r: number; g: number; b: number } {
+  const t = Math.max(0, Math.min(1, ratio + jitter))
+  if (t < 1 / 3) return lerpColor(C1, C2, t * 3)
+  if (t < 2 / 3) return lerpColor(C2, C3, (t - 1 / 3) * 3)
+  return lerpColor(C3, C4, (t - 2 / 3) * 3)
 }
 
-// 初始化场景
-function initScene() {
-  lines = []
-  // 各类元素分配不同数量
-  const counts: Record<FlowLine['element'], number> = {
-    sky: 40, swirl: 60, star: 30, village: 25, cypress: 20, moon: 15,
+// ==================== Arc Layer System ====================
+
+interface ArcSegment {
+  color: { r: number; g: number; b: number }
+  alpha: number
+  startAngle: number
+  endAngle: number
+  dir: number // 1 or -1
+}
+
+interface ArcLayer {
+  segments: ArcSegment[]
+}
+
+// Layer counts
+const BACK_N = 150
+const MIDDLE_N = 60
+const INTER_N = 80
+const FRONT_N = 100
+const POINTS_N = 100
+
+let backLayer: { color: { r: number; g: number; b: number }; alpha: number }[] = []
+let middleLayer: ArcLayer[] = []
+let interLayer: ArcLayer[] = []
+let frontLayer: ArcLayer[] = []
+let pointsLayer: ArcLayer[] = []
+
+let th = 0
+let viewport = 0
+
+function rand(min: number, max: number) { return Math.random() * (max - min) + min }
+
+function initLayers() {
+  backLayer = []
+  middleLayer = []
+  interLayer = []
+  frontLayer = []
+  pointsLayer = []
+
+  // Back layer: filled circles with gradient colors
+  for (let i = 0; i < BACK_N; i++) {
+    const ratio = i / (BACK_N - 1)
+    backLayer.push({
+      color: paletteColor(ratio),
+      alpha: (20 + 5 * ratio) / 255,
+    })
   }
-  for (const [el, count] of Object.entries(counts)) {
-    for (let i = 0; i < count; i++) {
-      const line = createLine(el as FlowLine['element'])
-      // 预推进
-      line.life = Math.floor(Math.random() * line.maxLife)
-      for (let j = 0; j < line.life && j < line.maxPoints; j++) {
-        advanceLine(line)
-      }
-      lines.push(line)
+
+  // Middle layer: arcs (5-9 segments each)
+  for (let i = 0; i < MIDDLE_N; i++) {
+    const ratio = i / (MIDDLE_N - 1)
+    const color = paletteColor(ratio, rand(0, 0.15))
+    const alpha = (70 + 5 * ratio) / 255
+    const r = Math.floor(rand(5, 9))
+    const segs: ArcSegment[] = []
+    let k = 0
+    const slice = (Math.PI * 2 - 0.01) / r
+    for (let j = 0; j < r; j++) {
+      let x = rand(k, k + slice / 2)
+      let y = rand(k + slice / 2, k + slice)
+      if (y < x) { const tmp = x; x = y; y = tmp }
+      const dir = Math.random() < 0.5 ? -1 : 1
+      segs.push({ color, alpha, startAngle: x, endAngle: y, dir })
+      k += slice
     }
+    middleLayer.push({ segments: segs })
+  }
+
+  // Inter layer: arcs (9-15 segments each)
+  for (let i = 0; i < INTER_N; i++) {
+    const ratio = i / (INTER_N - 1)
+    const color = paletteColor(ratio, rand(-0.3, 0))
+    const alpha = (70 + 5 * ratio) / 255
+    const r = Math.floor(rand(9, 15))
+    const segs: ArcSegment[] = []
+    let k = 0
+    const slice = (Math.PI * 2 - 0.01) / r
+    for (let j = 0; j < r; j++) {
+      let x = rand(k, k + slice / 2)
+      let y = rand(k + slice / 2, k + slice)
+      if (y < x) { const tmp = x; x = y; y = tmp }
+      const dir = Math.random() < 0.5 ? -1 : 1
+      segs.push({ color, alpha, startAngle: x, endAngle: y, dir })
+      k += slice
+    }
+    interLayer.push({ segments: segs })
+  }
+
+  // Front layer: arcs (3-6 segments, skip some)
+  for (let i = 0; i < FRONT_N; i++) {
+    const ratio = i / (FRONT_N - 1)
+    const color = paletteColor(ratio, rand(0, 0.15))
+    const alpha = (155 + 100 * ratio) / 255
+    const r = Math.floor(rand(3, 6))
+    const segs: ArcSegment[] = []
+    let k = 0
+    const slice = (Math.PI * 2 - 0.01) / r
+    for (let j = 0; j < r; j++) {
+      let x = rand(k, k + slice / 2)
+      let y = rand(k + slice / 2, k + slice)
+      if (y < x) { const tmp = x; x = y; y = tmp }
+      const dir = Math.random() < 0.5 ? -1 : 1
+      if (i % 4 < 1) { k += slice; continue }
+      segs.push({ color, alpha, startAngle: x, endAngle: y, dir })
+      k += slice
+    }
+    frontLayer.push({ segments: segs })
+  }
+
+  // Points layer: very short arcs (dots)
+  for (let i = 0; i < POINTS_N; i++) {
+    const ratio = i / (POINTS_N - 1)
+    const color = paletteColor(ratio, rand(-0.3, 0.3))
+    const alpha = Math.max(0, Math.min(1, (155 + 100 * rand(-1, 1)) / 255))
+    const r = Math.floor(rand(8, 16))
+    const segs: ArcSegment[] = []
+    let k = 0
+    const slice = (Math.PI * 2 - 0.01) / r
+    for (let j = 0; j < r; j++) {
+      const ang = rand(k, k + slice)
+      const dir = rand(-1, 1)
+      segs.push({ color, alpha, startAngle: ang, endAngle: ang, dir })
+      k += slice
+    }
+    pointsLayer.push({ segments: segs })
   }
 }
 
-// 绘制背景（深色渐变）
+// ==================== Planet ====================
+const PLANET_RATIO = 1 / 4.1
+const PLANET_Y_RATIO = -1 / 5
+
+// ==================== Rendering ====================
+
 function drawBackground() {
   if (!ctx) return
-  const grad = ctx.createLinearGradient(0, 0, 0, height)
-  grad.addColorStop(0, '#050816')
-  grad.addColorStop(0.3, '#0a0e2a')
-  grad.addColorStop(0.6, '#0d1b3e')
-  grad.addColorStop(0.75, '#0a1a0a')
-  grad.addColorStop(1, '#061206')
-  ctx.fillStyle = grad
+  ctx.fillStyle = '#140c25'
   ctx.fillRect(0, 0, width, height)
 }
 
-// 绘制单条流动线
-function drawLine(line: FlowLine) {
-  if (!ctx || line.points.length < 3) return
-  const pts = line.points
-  const lifeRatio = line.life / line.maxLife
-  const alpha = lifeRatio < 0.1 ? lifeRatio / 0.1 : lifeRatio > 0.8 ? (1 - lifeRatio) / 0.2 : 1
-  const energy = getAudioEnergy()
-
-  ctx.beginPath()
-  ctx.strokeStyle = line.color
-  ctx.lineWidth = line.width * (1 + energy.avg * 1.5)
-  ctx.globalAlpha = alpha * line.opacity
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-
-  ctx.moveTo(pts[0].x, pts[0].y)
-  for (let i = 1; i < pts.length - 1; i++) {
-    const xc = (pts[i].x + pts[i + 1].x) / 2
-    const yc = (pts[i].y + pts[i + 1].y) / 2
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc)
+function drawBackLayer() {
+  if (!ctx) return
+  ctx.save()
+  ctx.translate(width / 2, height / 2)
+  ctx.scale(1, -1)
+  for (let i = 0; i < backLayer.length; i++) {
+    const item = backLayer[i]
+    const radius = ((viewport - 40) * (1 - i / (BACK_N + 1))) / 2
+    ctx.beginPath()
+    ctx.fillStyle = colorStr(item.color, item.alpha)
+    ctx.arc(0, 0, radius, 0, Math.PI * 2)
+    ctx.fill()
   }
-  ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y)
-  ctx.stroke()
-  ctx.globalAlpha = 1
+  ctx.restore()
 }
 
-// 漩涡区域额外的装饰螺旋线
-function drawSwirlSpirals() {
+function drawArcLayer(
+  layers: ArcLayer[],
+  total: number,
+  strokeW: number,
+  speedFactor: number,
+  energy: { bass: number; mid: number; high: number; avg: number },
+  energyMul: number
+) {
   if (!ctx) return
-  const energy = getAudioEnergy()
+  ctx.save()
+  ctx.translate(width / 2, height / 2)
+  ctx.scale(1, -1)
 
-  for (const sc of swirlCenters) {
-    const cx = sc.x * width, cy = sc.y * height
-    const baseR = sc.r * width
+  for (let i = 0; i < layers.length; i++) {
+    const group = layers[i]
+    const ratio = i / (total + 1)
+    const baseRadius = (viewport - 40) * (1 - ratio) / 2
+    const depthFactor = 1.5 + (1 - ratio)
+    const audioBoost = 1 + energy.avg * energyMul
 
-    // 每个漩涡画几条引导螺旋线
-    for (let s = 0; s < 3; s++) {
+    for (let j = 0; j < group.segments.length; j++) {
+      const seg = group.segments[j]
+      const rotation = th * speedFactor * depthFactor * seg.dir * audioBoost
+
       ctx.beginPath()
-      ctx.strokeStyle = `rgba(100, 180, 255, ${0.04 + energy.mid * 0.03})`
-      ctx.lineWidth = 0.5 + energy.bass * 0.5
-      const offset = time * 0.008 * (s + 1) + s * Math.PI * 2 / 3
-      for (let a = 0; a < Math.PI * 8; a += 0.08) {
-        const r = (a / (Math.PI * 8)) * baseR * (1 + energy.mid * 0.5)
-        const x = cx + Math.cos(a + offset) * r
-        const y = cy + Math.sin(a + offset) * r
-        if (a === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
+      ctx.strokeStyle = colorStr(seg.color, seg.alpha)
+      ctx.lineWidth = strokeW
+
+      if (seg.startAngle === seg.endAngle) {
+        // Point: draw a tiny arc
+        const r = viewport * (1 - i / (total + 1)) / 2
+        ctx.arc(0, 0, r, seg.startAngle + rotation, seg.startAngle + rotation + 0.0001)
+      } else {
+        ctx.arc(0, 0, baseRadius, seg.startAngle + rotation, seg.endAngle + rotation)
       }
       ctx.stroke()
     }
   }
+  ctx.restore()
 }
 
-// 星星的辐射线装饰
-function drawStarBursts() {
+function drawPlanet() {
   if (!ctx) return
   const energy = getAudioEnergy()
+  const sz = viewport / 7
+  const msz = sz / 4
+  const px = viewport * PLANET_RATIO
+  const py = viewport * PLANET_Y_RATIO
 
-  for (const sp of starPositions) {
-    const sx = sp.x * width, sy = sp.y * height
-    const numRays = 6 + Math.floor(energy.high * 4)
-    const baseLen = 8 + energy.high * 15
-    const pulse = 1 + Math.sin(time * 0.04 + sp.x * 10) * 0.3
+  ctx.save()
+  ctx.translate(width / 2, height / 2)
+  ctx.scale(1, -1)
+  ctx.rotate(2 * th / 3 * (1 + energy.high * 0.5))
 
-    for (let r = 0; r < numRays; r++) {
-      const angle = (r / numRays) * Math.PI * 2 + time * 0.01 + sp.y * 5
-      const len = baseLen * pulse * (0.5 + Math.random() * 0.5)
-      ctx.beginPath()
-      ctx.strokeStyle = `rgba(255, 238, 88, ${0.15 + energy.high * 0.2})`
-      ctx.lineWidth = 0.3 + Math.random() * 0.5
-      ctx.moveTo(sx + Math.cos(angle) * 2, sy + Math.sin(angle) * 2)
-      ctx.lineTo(sx + Math.cos(angle) * len, sy + Math.sin(angle) * len)
-      ctx.stroke()
-    }
+  const norm = Math.hypot(px, py)
+  const nx = px / norm, ny = py / norm
+
+  for (let i = 0; i < BACK_N; i++) {
+    const j = i / (BACK_N - 1)
+    ctx.save()
+    ctx.translate(px, py)
+    ctx.translate(nx * msz * j / 2 + 0.1, ny * msz * j / 2 + 0.1)
+
+    // Rotate to align ellipse with planet direction
+    ctx.rotate(Math.atan2(py, px))
+
+    const k1 = lerpColor(C2, C3, 0.5)
+    const k2 = lerpColor(C1, C2, 0.2)
+    const s = 1 - Math.hypot(px, py) / viewport
+    const sMapped = s * 0.5
+    const k = lerpColor(k1, k2, Math.pow(j, sMapped))
+    const alpha = 25 / 255 + energy.mid * 0.1
+
+    ctx.beginPath()
+    ctx.fillStyle = colorStr(k, alpha)
+    ctx.ellipse(0, 0, (sz - msz * j) / 2, (sz - msz * j * 0.36) / 2, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
   }
+
+  ctx.restore()
 }
 
-// 月亮的同心弧线
-function drawMoonArcs() {
-  if (!ctx) return
-  const energy = getAudioEnergy()
-  const mx = moonPos.x * width, my = moonPos.y * height
-  const numArcs = 6 + Math.floor(energy.bass * 4)
-
-  for (let i = 0; i < numArcs; i++) {
-    const r = 15 + i * 8 + energy.bass * 10
-    const startAngle = time * 0.005 + i * 0.3
-    const arcLen = Math.PI * (0.3 + Math.random() * 0.5)
-    ctx.beginPath()
-    ctx.strokeStyle = `rgba(255, 249, 196, ${0.06 + (numArcs - i) * 0.02})`
-    ctx.lineWidth = 0.3 + Math.random() * 0.8
-    ctx.arc(mx, my, r, startAngle, startAngle + arcLen)
-    ctx.stroke()
-  }
-}
-
-// 村庄区域 —— 山丘轮廓用线条
-function drawVillageContours() {
-  if (!ctx) return
-  const energy = getAudioEnergy()
-  const baseY = height * 0.75
-
-  // 多层山丘轮廓线
-  for (let layer = 0; layer < 4; layer++) {
-    const yOff = layer * 12
-    const alpha = 0.08 - layer * 0.015
-    ctx.beginPath()
-    ctx.strokeStyle = `rgba(26, 94, 32, ${alpha + energy.mid * 0.03})`
-    ctx.lineWidth = 0.5 + layer * 0.3
-    for (let x = 0; x <= width; x += 2) {
-      const y = baseY - yOff
-        - Math.sin(x * 0.008 + layer) * 15
-        - Math.sin(x * 0.015 + 1 + layer) * 10
-        - Math.sin(x * 0.003 + layer * 0.5) * 25
-        + Math.sin(time * 0.01 + x * 0.01 + layer) * 2
-      if (x === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-  }
-
-  // 教堂尖塔 —— 用线条勾勒
-  const cx = width * 0.45
-  const cBase = baseY - 20
-  ctx.strokeStyle = 'rgba(22, 33, 62, 0.4)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(cx, cBase - 80)
-  ctx.lineTo(cx - 10, cBase)
-  ctx.moveTo(cx, cBase - 80)
-  ctx.lineTo(cx + 10, cBase)
-  ctx.stroke()
-
-  // 小房子的线条
-  for (let i = 0; i < 12; i++) {
-    const hx = width * (0.05 + i * 0.075) + Math.sin(i * 2.5) * 20
-    const hy = cBase - Math.sin(hx * 0.01) * 8
-    const hw = 14 + (i % 3) * 4
-    const hh = 10 + (i % 2) * 6
-    ctx.strokeStyle = `rgba(22, 33, 62, ${0.3 + Math.sin(time * 0.03 + i) * 0.1})`
-    ctx.lineWidth = 0.6
-    // 房子轮廓
-    ctx.beginPath()
-    ctx.moveTo(hx - hw / 2, hy)
-    ctx.lineTo(hx - hw / 2, hy - hh)
-    ctx.lineTo(hx, hy - hh - 10)
-    ctx.lineTo(hx + hw / 2, hy - hh)
-    ctx.lineTo(hx + hw / 2, hy)
-    ctx.stroke()
-    // 窗户（小十字线）
-    ctx.strokeStyle = `rgba(255, 238, 88, ${0.2 + Math.sin(time * 0.05 + i) * 0.1})`
-    ctx.lineWidth = 0.4
-    ctx.beginPath()
-    ctx.moveTo(hx - 2, hy - hh + 3)
-    ctx.lineTo(hx + 2, hy - hh + 3)
-    ctx.moveTo(hx, hy - hh + 1)
-    ctx.lineTo(hx, hy - hh + 5)
-    ctx.stroke()
-  }
-}
-
-// 柏树 —— 用密集的垂直流动线条
-function drawCypressLines() {
-  if (!ctx) return
-  const energy = getAudioEnergy()
-  const tx = width * 0.88
-  const baseY = height * 0.78
-  const treeH = 180 + energy.avg * 30
-  const topY = baseY - treeH
-
-  // 柏树轮廓引导线
-  const numLines = 12 + Math.floor(energy.bass * 6)
-  for (let i = 0; i < numLines; i++) {
-    const t = i / numLines
-    const x = tx - 30 + t * 60
-    // 宽度在顶部窄底部宽
-    const widthFactor = Math.abs(t - 0.5) * 2
-    const xOff = (widthFactor * 0.5 + 0.2) * 30
-    const wobble = Math.sin(time * 0.02 + i * 0.5) * 3 * (1 + energy.avg)
-
-    ctx.beginPath()
-    ctx.strokeStyle = `rgba(13, 59, 13, ${0.15 + Math.random() * 0.1})`
-    ctx.lineWidth = 0.3 + Math.random() * 0.5
-    ctx.moveTo(x + wobble, topY + Math.random() * 20)
-    for (let y = topY; y < baseY; y += 4) {
-      const progress = (y - topY) / treeH
-      // xExpand is part of the shape calculation
-      const wx = Math.sin(y * 0.03 + time * 0.03 + i) * 2 * (1 + energy.avg)
-      ctx.lineTo(tx + (x - tx) * (1 + progress * 0.5) + wx, y)
-    }
-    ctx.stroke()
-  }
-}
-
-// 主循环
 function animate() {
   if (!ctx) return
-  time++
+
+  const energy = getAudioEnergy()
 
   drawBackground()
 
-  // 装饰层（半透明引导线）
-  drawSwirlSpirals()
-  drawStarBursts()
-  drawMoonArcs()
-  drawVillageContours()
-  drawCypressLines()
+  // Back: filled gradient circles (bass affects opacity pulse)
+  drawBackLayer()
 
-  // 更新和绘制流动线条
-  const energy = getAudioEnergy()
+  // Middle arcs: rotate at th/8 speed, bass-driven
+  const midStroke = (viewport - 40) / 2 / (MIDDLE_N + 1)
+  drawArcLayer(middleLayer, MIDDLE_N, midStroke, 1 / 8, energy, 2)
 
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]
-    line.life++
+  // Inter arcs: rotate at th/6 speed, mid-driven
+  const interStroke = (viewport - 40) / 2 / (INTER_N + 1)
+  drawArcLayer(interLayer, INTER_N, interStroke, 1 / 6, energy, 1.5)
 
-    if (line.life < line.maxLife) {
-      advanceLine(line)
-      drawLine(line)
-    } else {
-      lines[i] = createLine(pickElement())
-    }
-  }
+  // Front arcs: rotate at th/2 speed, high-driven
+  const frontStroke = (viewport - 40) / 2 / (FRONT_N + 1)
+  drawArcLayer(frontLayer, FRONT_N, frontStroke, 1 / 2, energy, 3)
 
-  // 音频能量高时增加线条
-  if (energy.avg > 0.25 && lines.length < 250) {
-    const extra = Math.floor(energy.avg * 4)
-    for (let i = 0; i < extra; i++) {
-      lines.push(createLine(pickElement()))
-    }
-  }
+  // Points: very short arcs, th/2 speed
+  const pointsStroke = (viewport - 40) / (POINTS_N + 1) / 2
+  drawArcLayer(pointsLayer, POINTS_N, pointsStroke, 1 / 2, energy, 2)
 
+  // Planet
+  drawPlanet()
+
+  th += 0.01 * (1 + energy.avg * 0.5)
   animId = requestAnimationFrame(animate)
 }
 
@@ -614,7 +411,8 @@ function resize() {
   height = window.innerHeight
   canvas.width = width
   canvas.height = height
-  initScene()
+  viewport = Math.min(height, width)
+  initLayers()
 }
 
 onMounted(() => {
@@ -635,7 +433,7 @@ onUnmounted(() => {
 
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box }
-html, body { overflow: hidden; background: #050816 }
+html, body { overflow: hidden; background: #140c25 }
 .app { position: relative; width: 100vw; height: 100vh }
 canvas { display: block; width: 100%; height: 100% }
 
