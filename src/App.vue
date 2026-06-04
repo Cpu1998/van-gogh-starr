@@ -8,11 +8,11 @@
         📁 上传音乐
         <input type="file" accept="audio/*" @change="handleAudioUpload" hidden />
       </label>
-      <span class="hint">支持拖入音乐文件 | 默认使用麦克风律动</span>
+      <span class="hint">梵高星空 · 天体轮廓 · 同心弧线风格</span>
     </div>
     <canvas ref="canvasRef"></canvas>
     <div class="info">
-      <span>✨ 梵高星空 · 同心弧线律动</span>
+      <span>✨ 星 · 月亮 · 银河 — 大概轮廓与位置</span>
     </div>
   </div>
 </template>
@@ -43,16 +43,13 @@ async function initAudioFromFile(file: File) {
   analyser = audioCtx.createAnalyser()
   analyser.fftSize = 512
   dataArray = new Uint8Array(analyser.frequencyBinCount)
-
   audioElement = new Audio()
   audioElement.src = URL.createObjectURL(file)
   audioElement.crossOrigin = 'anonymous'
   audioElement.loop = true
-
   audioSource = audioCtx.createMediaElementSource(audioElement)
   audioSource.connect(analyser)
   analyser.connect(audioCtx.destination)
-
   sourceType = 'file'
   await audioElement.play()
   isPlaying.value = true
@@ -64,11 +61,9 @@ async function initMicAudio() {
   analyser = audioCtx.createAnalyser()
   analyser.fftSize = 512
   dataArray = new Uint8Array(analyser.frequencyBinCount)
-
   micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
   audioSource = audioCtx.createMediaStreamSource(micStream)
   audioSource.connect(analyser)
-
   sourceType = 'mic'
   isPlaying.value = true
 }
@@ -105,15 +100,13 @@ function getAudioEnergy() {
 }
 
 // ==================== Color Palette ====================
-// Deep purple → teal → warm yellow → white
-const C1 = { r: 20, g: 12, b: 53 }    // #140c35
-const C2 = { r: 29, g: 173, b: 164 }   // #1dada4
-const C3 = { r: 237, g: 246, b: 131 }   // #edf683
-const C4 = { r: 252, g: 253, b: 239 }   // #fcfdef
+const C1 = { r: 20, g: 12, b: 53 }
+const C2 = { r: 29, g: 173, b: 164 }
+const C3 = { r: 237, g: 246, b: 131 }
+const C4 = { r: 252, g: 253, b: 239 }
 
 function lerpColor(a: { r: number; g: number; b: number }, b2: { r: number; g: number; b: number }, t: number) {
-  const clamp = (v: number) => Math.max(0, Math.min(1, v))
-  t = clamp(t)
+  t = Math.max(0, Math.min(1, t))
   return {
     r: Math.round(a.r + (b2.r - a.r) * t),
     g: Math.round(a.g + (b2.g - a.g) * t),
@@ -132,240 +125,348 @@ function paletteColor(ratio: number, jitter: number = 0): { r: number; g: number
   return lerpColor(C3, C4, (t - 2 / 3) * 3)
 }
 
-// ==================== Arc Layer System ====================
+// ==================== Celestial Objects ====================
+// Positions based on Van Gogh's Starry Night (normalized 0-1, origin top-left)
+// Only upper 70% of canvas = sky region
+
+interface CelestialObject {
+  x: number   // normalized x (0=left, 1=right)
+  y: number   // normalized y (0=top, 1=bottom of sky)
+  size: number // relative size (1.0 = medium star)
+  type: 'star' | 'moon' | 'vortex' | 'milkyway'
+  brightness: number // 0-1
+  layers: ArcGroup[]
+}
 
 interface ArcSegment {
   color: { r: number; g: number; b: number }
   alpha: number
   startAngle: number
   endAngle: number
-  dir: number // 1 or -1
+  dir: number
 }
 
-interface ArcLayer {
+interface ArcGroup {
   segments: ArcSegment[]
 }
 
-// Layer counts
-const BACK_N = 150
-const MIDDLE_N = 60
-const INTER_N = 80
-const FRONT_N = 100
-const POINTS_N = 100
-
-let backLayer: { color: { r: number; g: number; b: number }; alpha: number }[] = []
-let middleLayer: ArcLayer[] = []
-let interLayer: ArcLayer[] = []
-let frontLayer: ArcLayer[] = []
-let pointsLayer: ArcLayer[] = []
-
 let th = 0
-let viewport = 0
+let objects: CelestialObject[] = []
 
 function rand(min: number, max: number) { return Math.random() * (max - min) + min }
 
-function initLayers() {
-  backLayer = []
-  middleLayer = []
-  interLayer = []
-  frontLayer = []
-  pointsLayer = []
+function makeArcLayers(count: number, segRange: [number, number], colorBias: number, alphaBase: number): ArcGroup[] {
+  const groups: ArcGroup[] = []
+  for (let i = 0; i < count; i++) {
+    const ratio = i / (count - 1)
+    const color = paletteColor(ratio, colorBias)
+    const alpha = (alphaBase + ratio * 50) / 255
+    const r = Math.floor(rand(segRange[0], segRange[1]))
+    const segs: ArcSegment[] = []
+    let k = 0
+    const slice = (Math.PI * 2 - 0.01) / r
+    for (let j = 0; j < r; j++) {
+      let x = rand(k, k + slice / 2)
+      let y = rand(k + slice / 2, k + slice)
+      if (y < x) { const tmp = x; x = y; y = tmp }
+      segs.push({ color, alpha, startAngle: x, endAngle: y, dir: Math.random() < 0.5 ? -1 : 1 })
+      k += slice
+    }
+    groups.push({ segments: segs })
+  }
+  return groups
+}
 
-  // Back layer: filled circles with gradient colors
-  for (let i = 0; i < BACK_N; i++) {
-    const ratio = i / (BACK_N - 1)
-    backLayer.push({
-      color: paletteColor(ratio),
-      alpha: (20 + 5 * ratio) / 255,
+function makeDotLayers(count: number, colorBias: number, alphaBase: number): ArcGroup[] {
+  const groups: ArcGroup[] = []
+  for (let i = 0; i < count; i++) {
+    const ratio = i / Math.max(1, count - 1)
+    const color = paletteColor(ratio, colorBias)
+    const alpha = Math.max(0, Math.min(1, (alphaBase + rand(-30, 30)) / 255))
+    const r = Math.floor(rand(6, 14))
+    const segs: ArcSegment[] = []
+    let k = 0
+    const slice = (Math.PI * 2) / r
+    for (let j = 0; j < r; j++) {
+      const ang = rand(k, k + slice)
+      segs.push({ color, alpha, startAngle: ang, endAngle: ang, dir: rand(-1, 1) })
+      k += slice
+    }
+    groups.push({ segments: segs })
+  }
+  return groups
+}
+
+function initObjects() {
+  objects = []
+
+  // ===== MILKY WAY: flowing band across the sky =====
+  // The central swirl / milky way is a series of overlapping vortex centers
+  // Main path: from left (~0.15, 0.35) curves up through center to right (~0.75, 0.15)
+  const milkyWayPoints = [
+    { x: 0.12, y: 0.42, size: 0.8 },
+    { x: 0.22, y: 0.38, size: 1.0 },
+    { x: 0.32, y: 0.35, size: 1.3 },  // main vortex area
+    { x: 0.38, y: 0.30, size: 1.5 },  // peak of main swirl
+    { x: 0.45, y: 0.28, size: 1.2 },
+    { x: 0.52, y: 0.25, size: 1.0 },
+    { x: 0.60, y: 0.22, size: 0.9 },
+    { x: 0.68, y: 0.20, size: 0.8 },
+    { x: 0.75, y: 0.18, size: 0.7 },
+    { x: 0.82, y: 0.20, size: 0.6 },
+    { x: 0.90, y: 0.25, size: 0.5 },
+  ]
+
+  for (const pt of milkyWayPoints) {
+    objects.push({
+      x: pt.x, y: pt.y, size: pt.size,
+      type: 'milkyway',
+      brightness: 0.3 + pt.size * 0.2,
+      layers: makeArcLayers(40, [4, 10], rand(-0.2, 0.1), 40),
     })
   }
 
-  // Middle layer: arcs (5-9 segments each)
-  for (let i = 0; i < MIDDLE_N; i++) {
-    const ratio = i / (MIDDLE_N - 1)
-    const color = paletteColor(ratio, rand(0, 0.15))
-    const alpha = (70 + 5 * ratio) / 255
-    const r = Math.floor(rand(5, 9))
-    const segs: ArcSegment[] = []
-    let k = 0
-    const slice = (Math.PI * 2 - 0.01) / r
-    for (let j = 0; j < r; j++) {
-      let x = rand(k, k + slice / 2)
-      let y = rand(k + slice / 2, k + slice)
-      if (y < x) { const tmp = x; x = y; y = tmp }
-      const dir = Math.random() < 0.5 ? -1 : 1
-      segs.push({ color, alpha, startAngle: x, endAngle: y, dir })
-      k += slice
-    }
-    middleLayer.push({ segments: segs })
+  // ===== MAIN VORTEX: the big swirl slightly left of center =====
+  objects.push({
+    x: 0.35, y: 0.33, size: 2.5,
+    type: 'vortex',
+    brightness: 0.6,
+    layers: makeArcLayers(70, [5, 12], 0.1, 50),
+  })
+
+  // ===== SECONDARY VORTEX: smaller swirl to the right =====
+  objects.push({
+    x: 0.62, y: 0.25, size: 1.5,
+    type: 'vortex',
+    brightness: 0.4,
+    layers: makeArcLayers(45, [5, 10], -0.1, 45),
+  })
+
+  // ===== MOON: upper right, crescent =====
+  objects.push({
+    x: 0.84, y: 0.14, size: 2.0,
+    type: 'moon',
+    brightness: 0.95,
+    layers: makeArcLayers(50, [6, 12], 0.4, 80),
+  })
+
+  // ===== STARS: scattered across the sky =====
+  // Bright stars (large halos)
+  const brightStars = [
+    { x: 0.18, y: 0.18 },  // upper left
+    { x: 0.50, y: 0.12 },  // top center
+    { x: 0.30, y: 0.50 },  // left-center, below main vortex
+    { x: 0.72, y: 0.38 },  // right side
+    { x: 0.14, y: 0.30 },  // far left
+  ]
+
+  for (const s of brightStars) {
+    objects.push({
+      x: s.x, y: s.y, size: 1.2,
+      type: 'star',
+      brightness: 0.8 + rand(0, 0.15),
+      layers: makeArcLayers(35, [5, 10], rand(0.1, 0.4), 70),
+    })
+    // Add dot halo around each bright star
+    const star = objects[objects.length - 1]
+    star.layers.push(...makeDotLayers(20, 0.3, 120))
   }
 
-  // Inter layer: arcs (9-15 segments each)
-  for (let i = 0; i < INTER_N; i++) {
-    const ratio = i / (INTER_N - 1)
-    const color = paletteColor(ratio, rand(-0.3, 0))
-    const alpha = (70 + 5 * ratio) / 255
-    const r = Math.floor(rand(9, 15))
-    const segs: ArcSegment[] = []
-    let k = 0
-    const slice = (Math.PI * 2 - 0.01) / r
-    for (let j = 0; j < r; j++) {
-      let x = rand(k, k + slice / 2)
-      let y = rand(k + slice / 2, k + slice)
-      if (y < x) { const tmp = x; x = y; y = tmp }
-      const dir = Math.random() < 0.5 ? -1 : 1
-      segs.push({ color, alpha, startAngle: x, endAngle: y, dir })
-      k += slice
-    }
-    interLayer.push({ segments: segs })
+  // Medium stars
+  const medStars = [
+    { x: 0.25, y: 0.10 },
+    { x: 0.42, y: 0.42 },
+    { x: 0.55, y: 0.35 },
+    { x: 0.78, y: 0.30 },
+    { x: 0.65, y: 0.45 },
+    { x: 0.38, y: 0.15 },
+    { x: 0.48, y: 0.48 },
+  ]
+
+  for (const s of medStars) {
+    objects.push({
+      x: s.x, y: s.y, size: 0.7,
+      type: 'star',
+      brightness: 0.5 + rand(0, 0.2),
+      layers: makeArcLayers(20, [5, 8], rand(0, 0.3), 60),
+    })
+    const star = objects[objects.length - 1]
+    star.layers.push(...makeDotLayers(10, 0.2, 100))
   }
 
-  // Front layer: arcs (3-6 segments, skip some)
-  for (let i = 0; i < FRONT_N; i++) {
-    const ratio = i / (FRONT_N - 1)
-    const color = paletteColor(ratio, rand(0, 0.15))
-    const alpha = (155 + 100 * ratio) / 255
-    const r = Math.floor(rand(3, 6))
-    const segs: ArcSegment[] = []
-    let k = 0
-    const slice = (Math.PI * 2 - 0.01) / r
-    for (let j = 0; j < r; j++) {
-      let x = rand(k, k + slice / 2)
-      let y = rand(k + slice / 2, k + slice)
-      if (y < x) { const tmp = x; x = y; y = tmp }
-      const dir = Math.random() < 0.5 ? -1 : 1
-      if (i % 4 < 1) { k += slice; continue }
-      segs.push({ color, alpha, startAngle: x, endAngle: y, dir })
-      k += slice
-    }
-    frontLayer.push({ segments: segs })
-  }
+  // Small stars / star dots
+  const smallStars = [
+    { x: 0.08, y: 0.20 }, { x: 0.22, y: 0.55 },
+    { x: 0.35, y: 0.58 }, { x: 0.58, y: 0.50 },
+    { x: 0.70, y: 0.12 }, { x: 0.85, y: 0.35 },
+    { x: 0.92, y: 0.18 }, { x: 0.15, y: 0.48 },
+    { x: 0.45, y: 0.55 }, { x: 0.75, y: 0.48 },
+    { x: 0.05, y: 0.35 }, { x: 0.60, y: 0.08 },
+    { x: 0.33, y: 0.22 }, { x: 0.88, y: 0.45 },
+    { x: 0.28, y: 0.62 }, { x: 0.53, y: 0.05 },
+  ]
 
-  // Points layer: very short arcs (dots)
-  for (let i = 0; i < POINTS_N; i++) {
-    const ratio = i / (POINTS_N - 1)
-    const color = paletteColor(ratio, rand(-0.3, 0.3))
-    const alpha = Math.max(0, Math.min(1, (155 + 100 * rand(-1, 1)) / 255))
-    const r = Math.floor(rand(8, 16))
-    const segs: ArcSegment[] = []
-    let k = 0
-    const slice = (Math.PI * 2 - 0.01) / r
-    for (let j = 0; j < r; j++) {
-      const ang = rand(k, k + slice)
-      const dir = rand(-1, 1)
-      segs.push({ color, alpha, startAngle: ang, endAngle: ang, dir })
-      k += slice
-    }
-    pointsLayer.push({ segments: segs })
+  for (const s of smallStars) {
+    objects.push({
+      x: s.x, y: s.y, size: 0.35,
+      type: 'star',
+      brightness: 0.3 + rand(0, 0.2),
+      layers: makeDotLayers(8, rand(-0.2, 0.4), 90),
+    })
   }
 }
-
-// ==================== Planet ====================
-const PLANET_RATIO = 1 / 4.1
-const PLANET_Y_RATIO = -1 / 5
 
 // ==================== Rendering ====================
 
 function drawBackground() {
   if (!ctx) return
-  ctx.fillStyle = '#140c25'
+  // Gradient sky: dark blue at top, slightly lighter at bottom
+  const grad = ctx.createLinearGradient(0, 0, 0, height)
+  grad.addColorStop(0, '#0a0620')
+  grad.addColorStop(0.4, '#140c35')
+  grad.addColorStop(0.7, '#1a1048')
+  grad.addColorStop(1, '#0d1530')
+  ctx.fillStyle = grad
   ctx.fillRect(0, 0, width, height)
 }
 
-function drawBackLayer() {
-  if (!ctx) return
-  ctx.save()
-  ctx.translate(width / 2, height / 2)
-  ctx.scale(1, -1)
-  for (let i = 0; i < backLayer.length; i++) {
-    const item = backLayer[i]
-    const radius = ((viewport - 40) * (1 - i / (BACK_N + 1))) / 2
-    ctx.beginPath()
-    ctx.fillStyle = colorStr(item.color, item.alpha)
-    ctx.arc(0, 0, radius, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.restore()
-}
-
-function drawArcLayer(
-  layers: ArcLayer[],
-  total: number,
-  strokeW: number,
-  speedFactor: number,
-  energy: { bass: number; mid: number; high: number; avg: number },
-  energyMul: number
+function drawObject(
+  obj: CelestialObject,
+  energy: { bass: number; mid: number; high: number; avg: number }
 ) {
   if (!ctx) return
+
+  const cx = obj.x * width
+  const cy = obj.y * height * 0.75  // sky occupies top 75%
+  const baseSize = Math.min(width, height) * 0.02 * obj.size
+
+  // Speed varies by type
+  let speedFactor = 1 / 6
+  if (obj.type === 'vortex') speedFactor = 1 / 4
+  else if (obj.type === 'moon') speedFactor = 1 / 10
+  else if (obj.type === 'star') speedFactor = 1 / 3
+  else if (obj.type === 'milkyway') speedFactor = 1 / 8
+
+  // Energy influence
+  let energyMul = 1
+  if (obj.type === 'vortex') energyMul = 3
+  else if (obj.type === 'moon') energyMul = 1.5
+  else if (obj.type === 'star') energyMul = 2
+
+  const audioBoost = 1 + energy.avg * energyMul
+
   ctx.save()
-  ctx.translate(width / 2, height / 2)
-  ctx.scale(1, -1)
+  ctx.translate(cx, cy)
 
-  for (let i = 0; i < layers.length; i++) {
-    const group = layers[i]
-    const ratio = i / (total + 1)
-    const baseRadius = (viewport - 40) * (1 - ratio) / 2
-    const depthFactor = 1.5 + (1 - ratio)
-    const audioBoost = 1 + energy.avg * energyMul
+  for (let i = 0; i < obj.layers.length; i++) {
+    const group = obj.layers[i]
+    const ratio = i / (obj.layers.length + 1)
+    const radius = baseSize * (obj.layers.length * 0.6) * (1 - ratio)
 
-    for (let j = 0; j < group.segments.length; j++) {
-      const seg = group.segments[j]
-      const rotation = th * speedFactor * depthFactor * seg.dir * audioBoost
+    // Moon crescent offset
+    let offsetX = 0, offsetY = 0
+    if (obj.type === 'moon') {
+      // Shift inner layers to create crescent illusion
+      const crescentShift = ratio * baseSize * 1.5
+      offsetX = crescentShift * 0.6
+      offsetY = -crescentShift * 0.3
+    }
+
+    for (const seg of group.segments) {
+      const rotation = th * speedFactor * (1 + ratio * 0.5) * seg.dir * audioBoost
 
       ctx.beginPath()
-      ctx.strokeStyle = colorStr(seg.color, seg.alpha)
-      ctx.lineWidth = strokeW
+      ctx.strokeStyle = colorStr(seg.color, seg.alpha * obj.brightness)
+
+      if (obj.type === 'moon') {
+        // Use thinner strokes for moon, more ethereal
+        ctx.lineWidth = Math.max(0.5, baseSize * 0.15)
+      } else if (obj.type === 'vortex') {
+        ctx.lineWidth = Math.max(0.8, baseSize * 0.2)
+      } else {
+        ctx.lineWidth = Math.max(0.5, baseSize * 0.15 * (1 - ratio))
+      }
 
       if (seg.startAngle === seg.endAngle) {
-        // Point: draw a tiny arc
-        const r = viewport * (1 - i / (total + 1)) / 2
-        ctx.arc(0, 0, r, seg.startAngle + rotation, seg.startAngle + rotation + 0.0001)
+        // Dot
+        ctx.arc(offsetX, offsetY, radius, seg.startAngle + rotation, seg.startAngle + rotation + 0.001)
       } else {
-        ctx.arc(0, 0, baseRadius, seg.startAngle + rotation, seg.endAngle + rotation)
+        ctx.arc(offsetX, offsetY, radius, seg.startAngle + rotation, seg.endAngle + rotation)
       }
       ctx.stroke()
     }
   }
+
+  // For bright stars and moon, add a glow center
+  if ((obj.type === 'star' && obj.brightness > 0.7) || obj.type === 'moon') {
+    const glowSize = baseSize * (obj.type === 'moon' ? 0.8 : 0.4)
+    const grad = ctx.createRadialGradient(
+      obj.type === 'moon' ? baseSize * 0.3 : 0,
+      obj.type === 'moon' ? -baseSize * 0.15 : 0,
+      0,
+      obj.type === 'moon' ? baseSize * 0.3 : 0,
+      obj.type === 'moon' ? -baseSize * 0.15 : 0,
+      glowSize
+    )
+    const glowColor = obj.type === 'moon'
+      ? lerpColor(C3, C4, 0.6)
+      : lerpColor(C2, C3, 0.7)
+    grad.addColorStop(0, colorStr(glowColor, 0.6 * obj.brightness))
+    grad.addColorStop(0.5, colorStr(glowColor, 0.15 * obj.brightness))
+    grad.addColorStop(1, colorStr(glowColor, 0))
+    ctx.fillStyle = grad
+    ctx.fillRect(-glowSize, -glowSize, glowSize * 2, glowSize * 2)
+  }
+
   ctx.restore()
 }
 
-function drawPlanet() {
+// Milky way connecting flow — draw a subtle flowing band between milky way points
+function drawMilkyWayFlow(energy: { bass: number; mid: number; high: number; avg: number }) {
   if (!ctx) return
-  const energy = getAudioEnergy()
-  const sz = viewport / 7
-  const msz = sz / 4
-  const px = viewport * PLANET_RATIO
-  const py = viewport * PLANET_Y_RATIO
 
   ctx.save()
-  ctx.translate(width / 2, height / 2)
-  ctx.scale(1, -1)
-  ctx.rotate(2 * th / 3 * (1 + energy.high * 0.5))
+  ctx.globalAlpha = 0.15 + energy.avg * 0.1
 
-  const norm = Math.hypot(px, py)
-  const nx = px / norm, ny = py / norm
+  const milkyWayPoints = [
+    { x: 0.12, y: 0.42 },
+    { x: 0.22, y: 0.38 },
+    { x: 0.32, y: 0.35 },
+    { x: 0.38, y: 0.30 },
+    { x: 0.45, y: 0.28 },
+    { x: 0.52, y: 0.25 },
+    { x: 0.60, y: 0.22 },
+    { x: 0.68, y: 0.20 },
+    { x: 0.75, y: 0.18 },
+    { x: 0.82, y: 0.20 },
+    { x: 0.90, y: 0.25 },
+  ]
 
-  for (let i = 0; i < BACK_N; i++) {
-    const j = i / (BACK_N - 1)
-    ctx.save()
-    ctx.translate(px, py)
-    ctx.translate(nx * msz * j / 2 + 0.1, ny * msz * j / 2 + 0.1)
-
-    // Rotate to align ellipse with planet direction
-    ctx.rotate(Math.atan2(py, px))
-
-    const k1 = lerpColor(C2, C3, 0.5)
-    const k2 = lerpColor(C1, C2, 0.2)
-    const s = 1 - Math.hypot(px, py) / viewport
-    const sMapped = s * 0.5
-    const k = lerpColor(k1, k2, Math.pow(j, sMapped))
-    const alpha = 25 / 255 + energy.mid * 0.1
-
+  // Draw flowing bezier curves
+  for (let pass = 0; pass < 3; pass++) {
     ctx.beginPath()
-    ctx.fillStyle = colorStr(k, alpha)
-    ctx.ellipse(0, 0, (sz - msz * j) / 2, (sz - msz * j * 0.36) / 2, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.restore()
+    const wave = Math.sin(th * 0.3 + pass) * 0.02
+    const startY = milkyWayPoints[0].y * height * 0.75 + wave * height
+    ctx.moveTo(milkyWayPoints[0].x * width, startY)
+
+    for (let i = 1; i < milkyWayPoints.length - 1; i++) {
+      const curr = milkyWayPoints[i]
+      const next = milkyWayPoints[i + 1]
+      const cpx = curr.x * width
+      const cpy = curr.y * height * 0.75 + Math.sin(th * 0.5 + i + pass) * height * 0.02
+      const epx = ((curr.x + next.x) / 2) * width
+      const epy = ((curr.y + next.y) / 2) * height * 0.75 + Math.sin(th * 0.4 + i * 2 + pass) * height * 0.015
+      ctx.quadraticCurveTo(cpx, cpy, epx, epy)
+    }
+
+    const last = milkyWayPoints[milkyWayPoints.length - 1]
+    ctx.lineTo(last.x * width, last.y * height * 0.75)
+
+    const bandWidth = (15 + pass * 8) * (1 + energy.bass * 0.5)
+    ctx.lineWidth = bandWidth
+    const flowColor = paletteColor(0.3 + pass * 0.15, 0)
+    ctx.strokeStyle = colorStr(flowColor, 0.08 + pass * 0.03)
+    ctx.stroke()
   }
 
   ctx.restore()
@@ -373,34 +474,22 @@ function drawPlanet() {
 
 function animate() {
   if (!ctx) return
-
   const energy = getAudioEnergy()
 
   drawBackground()
 
-  // Back: filled gradient circles (bass affects opacity pulse)
-  drawBackLayer()
+  // Draw milky way connecting flow first (behind everything)
+  drawMilkyWayFlow(energy)
 
-  // Middle arcs: rotate at th/8 speed, bass-driven
-  const midStroke = (viewport - 40) / 2 / (MIDDLE_N + 1)
-  drawArcLayer(middleLayer, MIDDLE_N, midStroke, 1 / 8, energy, 2)
+  // Sort: draw milkyway first, then vortex, then stars, then moon on top
+  const order = { milkyway: 0, vortex: 1, star: 2, moon: 3 }
+  const sorted = [...objects].sort((a, b) => order[a.type] - order[b.type])
 
-  // Inter arcs: rotate at th/6 speed, mid-driven
-  const interStroke = (viewport - 40) / 2 / (INTER_N + 1)
-  drawArcLayer(interLayer, INTER_N, interStroke, 1 / 6, energy, 1.5)
+  for (const obj of sorted) {
+    drawObject(obj, energy)
+  }
 
-  // Front arcs: rotate at th/2 speed, high-driven
-  const frontStroke = (viewport - 40) / 2 / (FRONT_N + 1)
-  drawArcLayer(frontLayer, FRONT_N, frontStroke, 1 / 2, energy, 3)
-
-  // Points: very short arcs, th/2 speed
-  const pointsStroke = (viewport - 40) / (POINTS_N + 1) / 2
-  drawArcLayer(pointsLayer, POINTS_N, pointsStroke, 1 / 2, energy, 2)
-
-  // Planet
-  drawPlanet()
-
-  th += 0.01 * (1 + energy.avg * 0.5)
+  th += 0.008 * (1 + energy.avg * 0.5)
   animId = requestAnimationFrame(animate)
 }
 
@@ -411,8 +500,7 @@ function resize() {
   height = window.innerHeight
   canvas.width = width
   canvas.height = height
-  viewport = Math.min(height, width)
-  initLayers()
+  initObjects()
 }
 
 onMounted(() => {
@@ -433,7 +521,7 @@ onUnmounted(() => {
 
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box }
-html, body { overflow: hidden; background: #140c25 }
+html, body { overflow: hidden; background: #0a0620 }
 .app { position: relative; width: 100vw; height: 100vh }
 canvas { display: block; width: 100%; height: 100% }
 
