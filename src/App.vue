@@ -8,11 +8,11 @@
         📁 上传音乐
         <input type="file" accept="audio/*" @change="handleAudioUpload" hidden />
       </label>
-      <span class="hint">梵高星空 · 天体轮廓 · 同心弧线风格</span>
+      <span class="hint">梵高星空 · 天体轮廓</span>
     </div>
     <canvas ref="canvasRef"></canvas>
     <div class="info">
-      <span>✨ 星 · 月亮 · 银河 — 大概轮廓与位置</span>
+      <span>✨ 星 · 月亮 · 旋涡 · 流动天空</span>
     </div>
   </div>
 </template>
@@ -27,6 +27,7 @@ let ctx: CanvasRenderingContext2D | null = null
 let animId = 0
 let width = 0
 let height = 0
+let skyH = 0  // sky region height (top 65%)
 
 // ==================== Audio ====================
 let audioCtx: AudioContext | null = null
@@ -35,7 +36,6 @@ let dataArray: Uint8Array = new Uint8Array(0)
 let audioSource: MediaElementAudioSourceNode | MediaStreamAudioSourceNode | null = null
 let audioElement: HTMLAudioElement | null = null
 let micStream: MediaStream | null = null
-let sourceType: 'none' | 'file' | 'mic' = 'none'
 
 async function initAudioFromFile(file: File) {
   cleanupAudio()
@@ -50,7 +50,6 @@ async function initAudioFromFile(file: File) {
   audioSource = audioCtx.createMediaElementSource(audioElement)
   audioSource.connect(analyser)
   analyser.connect(audioCtx.destination)
-  sourceType = 'file'
   await audioElement.play()
   isPlaying.value = true
 }
@@ -64,7 +63,6 @@ async function initMicAudio() {
   micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
   audioSource = audioCtx.createMediaStreamSource(micStream)
   audioSource.connect(analyser)
-  sourceType = 'mic'
   isPlaying.value = true
 }
 
@@ -72,7 +70,7 @@ function cleanupAudio() {
   if (audioElement) { audioElement.pause(); audioElement.src = ''; audioElement = null }
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null }
   if (audioCtx && audioCtx.state !== 'closed') { audioCtx.close() }
-  audioCtx = null; analyser = null; audioSource = null; sourceType = 'none'
+  audioCtx = null; analyser = null; audioSource = null
   isPlaying.value = false
 }
 
@@ -99,219 +97,222 @@ function getAudioEnergy() {
   return { bass, mid, high, avg: (bass + mid + high) / 3 }
 }
 
-// ==================== Color Palette ====================
-const C1 = { r: 20, g: 12, b: 53 }
-const C2 = { r: 29, g: 173, b: 164 }
-const C3 = { r: 237, g: 246, b: 131 }
-const C4 = { r: 252, g: 253, b: 239 }
+// ==================== Color Palette (Van Gogh's actual colors) ====================
+// Sky: deep indigo blue → cobalt blue → Prussian blue
+// Stars/Moon: cadmium yellow → white-yellow
+// Highlights: teal/turquoise touches
+const INDIGO     = { r: 15, g: 10, b: 60 }     // deep sky
+const COBALT     = { r: 30, g: 50, b: 140 }     // mid sky blue
+const PRUSSIAN   = { r: 20, g: 35, b: 95 }      // dark blue
+const TEAL       = { r: 50, g: 160, b: 150 }    // turquoise touches
+const CAD_YELLOW = { r: 255, g: 220, b: 50 }    // cadmium yellow (stars)
+const PALE_YELLOW= { r: 255, g: 245, b: 140 }   // pale yellow (star halos)
+const WHITE_YELLOW= { r: 255, g: 252, b: 220 }  // near-white yellow
 
-function lerpColor(a: { r: number; g: number; b: number }, b2: { r: number; g: number; b: number }, t: number) {
+function lerpColor(a: {r:number;g:number;b:number}, b2: {r:number;g:number;b:number}, t: number) {
   t = Math.max(0, Math.min(1, t))
-  return {
-    r: Math.round(a.r + (b2.r - a.r) * t),
-    g: Math.round(a.g + (b2.g - a.g) * t),
-    b: Math.round(a.b + (b2.b - a.b) * t),
-  }
+  return { r: Math.round(a.r+(b2.r-a.r)*t), g: Math.round(a.g+(b2.g-a.g)*t), b: Math.round(a.b+(b2.b-a.b)*t) }
 }
 
-function colorStr(c: { r: number; g: number; b: number }, alpha: number) {
+function colorStr(c: {r:number;g:number;b:number}, alpha: number) {
   return `rgba(${c.r},${c.g},${c.b},${alpha})`
 }
 
-function paletteColor(ratio: number, jitter: number = 0): { r: number; g: number; b: number } {
-  const t = Math.max(0, Math.min(1, ratio + jitter))
-  if (t < 1 / 3) return lerpColor(C1, C2, t * 3)
-  if (t < 2 / 3) return lerpColor(C2, C3, (t - 1 / 3) * 3)
-  return lerpColor(C3, C4, (t - 2 / 3) * 3)
-}
+// ==================== THE GREAT SWIRL ====================
+// Van Gogh's central vortex: a large spiral in the middle-left of sky
+// It's the most iconic feature - concentric flowing curves spiraling inward
 
-// ==================== Celestial Objects ====================
-// Positions based on Van Gogh's Starry Night (normalized 0-1, origin top-left)
-// Only upper 70% of canvas = sky region
-
-interface CelestialObject {
-  x: number   // normalized x (0=left, 1=right)
-  y: number   // normalized y (0=top, 1=bottom of sky)
-  size: number // relative size (1.0 = medium star)
-  type: 'star' | 'moon' | 'vortex' | 'milkyway'
-  brightness: number // 0-1
-  layers: ArcGroup[]
-}
-
-interface ArcSegment {
-  color: { r: number; g: number; b: number }
+interface SpiralRing {
+  baseRadius: number
+  startAng: number
+  sweep: number   // how much of the circle this arc covers
+  color: {r:number;g:number;b:number}
   alpha: number
-  startAngle: number
-  endAngle: number
-  dir: number
+  width: number
+  dir: number  // 1 or -1
+  speed: number
 }
 
-interface ArcGroup {
-  segments: ArcSegment[]
+interface StarHalo {
+  rings: SpiralRing[]
+}
+
+interface FlowWave {
+  yBase: number     // normalized y position in sky
+  amplitude: number
+  frequency: number
+  phase: number
+  color: {r:number;g:number;b:number}
+  alpha: number
+  strokeW: number
 }
 
 let th = 0
-let objects: CelestialObject[] = []
+let mainVortex: SpiralRing[] = []
+let secondaryVortex: SpiralRing[] = []
+let stars: { x:number; y:number; size:number; halo: StarHalo; coreColor:{r:number;g:number;b:number} }[] = []
+let moonRings: SpiralRing[] = []
+let flowWaves: FlowWave[] = []
 
-function rand(min: number, max: number) { return Math.random() * (max - min) + min }
+function rand(a: number, b: number) { return Math.random() * (b - a) + a }
 
-function makeArcLayers(count: number, segRange: [number, number], colorBias: number, alphaBase: number): ArcGroup[] {
-  const groups: ArcGroup[] = []
+function makeSpiralRings(cx: number, count: number, maxR: number, colorFrom: {r:number;g:number;b:number}, colorTo: {r:number;g:number;b:number}, baseSpeed: number): SpiralRing[] {
+  const rings: SpiralRing[] = []
   for (let i = 0; i < count; i++) {
-    const ratio = i / (count - 1)
-    const color = paletteColor(ratio, colorBias)
-    const alpha = (alphaBase + ratio * 50) / 255
-    const r = Math.floor(rand(segRange[0], segRange[1]))
-    const segs: ArcSegment[] = []
-    let k = 0
-    const slice = (Math.PI * 2 - 0.01) / r
-    for (let j = 0; j < r; j++) {
-      let x = rand(k, k + slice / 2)
-      let y = rand(k + slice / 2, k + slice)
-      if (y < x) { const tmp = x; x = y; y = tmp }
-      segs.push({ color, alpha, startAngle: x, endAngle: y, dir: Math.random() < 0.5 ? -1 : 1 })
-      k += slice
-    }
-    groups.push({ segments: segs })
+    const t = i / (count - 1)
+    const r = maxR * (0.15 + t * 0.85)  // from inner to outer
+    // Each ring is an arc covering most of the circle, with gaps creating the spiral look
+    const sweep = rand(Math.PI * 1.2, Math.PI * 1.8)  // 60-90% of circle
+    const startAng = rand(0, Math.PI * 2)
+    const color = lerpColor(colorFrom, colorTo, t)
+    const alpha = (0.2 + t * 0.3) + rand(-0.05, 0.05)
+    const w = (maxR * 0.04) * (1 - t * 0.4)  // slightly thinner outer rings
+    rings.push({
+      baseRadius: r,
+      startAng,
+      sweep,
+      color,
+      alpha: Math.max(0.1, Math.min(0.7, alpha)),
+      width: Math.max(1, w),
+      dir: Math.random() < 0.7 ? 1 : -1,
+      speed: baseSpeed * (0.5 + t * 0.8) * (Math.random() < 0.5 ? 1 : 0.8),
+    })
   }
-  return groups
+  return rings
 }
 
-function makeDotLayers(count: number, colorBias: number, alphaBase: number): ArcGroup[] {
-  const groups: ArcGroup[] = []
-  for (let i = 0; i < count; i++) {
-    const ratio = i / Math.max(1, count - 1)
-    const color = paletteColor(ratio, colorBias)
-    const alpha = Math.max(0, Math.min(1, (alphaBase + rand(-30, 30)) / 255))
-    const r = Math.floor(rand(6, 14))
-    const segs: ArcSegment[] = []
-    let k = 0
-    const slice = (Math.PI * 2) / r
-    for (let j = 0; j < r; j++) {
-      const ang = rand(k, k + slice)
-      segs.push({ color, alpha, startAngle: ang, endAngle: ang, dir: rand(-1, 1) })
-      k += slice
-    }
-    groups.push({ segments: segs })
+function makeStarHalo(size: number): StarHalo {
+  const rings: SpiralRing[] = []
+  const ringCount = Math.floor(8 + size * 8)
+  const maxR = size * 25
+  for (let i = 0; i < ringCount; i++) {
+    const t = i / (ringCount - 1)
+    const r = maxR * (0.2 + t * 0.8)
+    const sweep = rand(Math.PI * 1.5, Math.PI * 2)
+    const startAng = rand(0, Math.PI * 2)
+    // Stars glow yellow-white
+    const color = lerpColor(PALE_YELLOW, CAD_YELLOW, t)
+    const alpha = (0.6 - t * 0.4)
+    rings.push({
+      baseRadius: r,
+      startAng,
+      sweep,
+      color,
+      alpha: Math.max(0.05, alpha),
+      width: Math.max(0.5, size * 3 * (1 - t * 0.6)),
+      dir: Math.random() < 0.5 ? 1 : -1,
+      speed: 0.3 + t * 0.3,
+    })
   }
-  return groups
+  return { rings }
 }
 
-function initObjects() {
-  objects = []
+function initScene() {
+  mainVortex = []
+  secondaryVortex = []
+  stars = []
+  moonRings = []
+  flowWaves = []
 
-  // ===== MILKY WAY: flowing band across the sky =====
-  // The central swirl / milky way is a series of overlapping vortex centers
-  // Main path: from left (~0.15, 0.35) curves up through center to right (~0.75, 0.15)
-  const milkyWayPoints = [
-    { x: 0.12, y: 0.42, size: 0.8 },
-    { x: 0.22, y: 0.38, size: 1.0 },
-    { x: 0.32, y: 0.35, size: 1.3 },  // main vortex area
-    { x: 0.38, y: 0.30, size: 1.5 },  // peak of main swirl
-    { x: 0.45, y: 0.28, size: 1.2 },
-    { x: 0.52, y: 0.25, size: 1.0 },
-    { x: 0.60, y: 0.22, size: 0.9 },
-    { x: 0.68, y: 0.20, size: 0.8 },
-    { x: 0.75, y: 0.18, size: 0.7 },
-    { x: 0.82, y: 0.20, size: 0.6 },
-    { x: 0.90, y: 0.25, size: 0.5 },
-  ]
+  // ===== MAIN VORTEX =====
+  // Position: roughly center of the sky, slightly left
+  // In the painting it's the massive spiral taking up ~30% of sky
+  // Center at approximately (35%, 40%) of sky region
+  mainVortex = makeSpiralRings(
+    0,
+    55,      // 55 concentric arc rings
+    Math.min(width, skyH) * 0.22,  // large radius
+    lerpColor(COBALT, TEAL, 0.3),  // inner: blue-teal
+    lerpColor(INDIGO, COBALT, 0.4), // outer: deeper blue
+    0.4      // base speed
+  )
 
-  for (const pt of milkyWayPoints) {
-    objects.push({
-      x: pt.x, y: pt.y, size: pt.size,
-      type: 'milkyway',
-      brightness: 0.3 + pt.size * 0.2,
-      layers: makeArcLayers(40, [4, 10], rand(-0.2, 0.1), 40),
+  // ===== SECONDARY VORTEX =====
+  // Smaller swirl to the right of main vortex, around (62%, 28%)
+  secondaryVortex = makeSpiralRings(
+    0,
+    30,
+    Math.min(width, skyH) * 0.10,
+    lerpColor(COBALT, TEAL, 0.4),
+    PRUSSIAN,
+    0.3
+  )
+
+  // ===== MOON =====
+  // Upper right corner: bright crescent moon with radiating rings
+  // Position: (82%, 15%) of sky region
+  // Moon has distinct concentric rings radiating outward, like a sun
+  const moonMaxR = Math.min(width, skyH) * 0.08
+  for (let i = 0; i < 25; i++) {
+    const t = i / 24
+    const r = moonMaxR * (0.1 + t * 0.9)
+    const sweep = rand(Math.PI * 1.4, Math.PI * 1.9)
+    const startAng = rand(0, Math.PI * 2)
+    const color = lerpColor(WHITE_YELLOW, CAD_YELLOW, t)
+    const alpha = 0.7 - t * 0.45
+    moonRings.push({
+      baseRadius: r,
+      startAng,
+      sweep,
+      color,
+      alpha: Math.max(0.1, alpha),
+      width: Math.max(1, moonMaxR * 0.03 * (1 - t * 0.5)),
+      dir: Math.random() < 0.5 ? 1 : -1,
+      speed: 0.15 + t * 0.15,
     })
   }
 
-  // ===== MAIN VORTEX: the big swirl slightly left of center =====
-  objects.push({
-    x: 0.35, y: 0.33, size: 2.5,
-    type: 'vortex',
-    brightness: 0.6,
-    layers: makeArcLayers(70, [5, 12], 0.1, 50),
-  })
+  // ===== STARS with halos =====
+  // Van Gogh painted several prominent stars, each with concentric ring halos
+  // Positions based on actual painting:
 
-  // ===== SECONDARY VORTEX: smaller swirl to the right =====
-  objects.push({
-    x: 0.62, y: 0.25, size: 1.5,
-    type: 'vortex',
-    brightness: 0.4,
-    layers: makeArcLayers(45, [5, 10], -0.1, 45),
-  })
-
-  // ===== MOON: upper right, crescent =====
-  objects.push({
-    x: 0.84, y: 0.14, size: 2.0,
-    type: 'moon',
-    brightness: 0.95,
-    layers: makeArcLayers(50, [6, 12], 0.4, 80),
-  })
-
-  // ===== STARS: scattered across the sky =====
-  // Bright stars (large halos)
-  const brightStars = [
-    { x: 0.18, y: 0.18 },  // upper left
-    { x: 0.50, y: 0.12 },  // top center
-    { x: 0.30, y: 0.50 },  // left-center, below main vortex
-    { x: 0.72, y: 0.38 },  // right side
-    { x: 0.14, y: 0.30 },  // far left
+  const starDefs = [
+    // Upper-left bright star (very prominent in the painting)
+    { x: 0.12, y: 0.18, size: 1.2, color: CAD_YELLOW },
+    // Star in upper-center area
+    { x: 0.28, y: 0.12, size: 0.8, color: PALE_YELLOW },
+    // Star above the main vortex
+    { x: 0.40, y: 0.15, size: 1.0, color: CAD_YELLOW },
+    // Star to the right of main vortex
+    { x: 0.55, y: 0.35, size: 0.9, color: PALE_YELLOW },
+    // Star near upper-right, below moon
+    { x: 0.72, y: 0.30, size: 1.1, color: CAD_YELLOW },
+    // Star near the horizon on the right
+    { x: 0.80, y: 0.50, size: 0.7, color: PALE_YELLOW },
+    // Small star far left
+    { x: 0.06, y: 0.35, size: 0.5, color: PALE_YELLOW },
+    // Small star top area
+    { x: 0.48, y: 0.08, size: 0.6, color: PALE_YELLOW },
+    // Star between the two vortices
+    { x: 0.50, y: 0.22, size: 0.7, color: CAD_YELLOW },
+    // Star near moon
+    { x: 0.88, y: 0.22, size: 0.6, color: WHITE_YELLOW },
   ]
 
-  for (const s of brightStars) {
-    objects.push({
-      x: s.x, y: s.y, size: 1.2,
-      type: 'star',
-      brightness: 0.8 + rand(0, 0.15),
-      layers: makeArcLayers(35, [5, 10], rand(0.1, 0.4), 70),
-    })
-    // Add dot halo around each bright star
-    const star = objects[objects.length - 1]
-    star.layers.push(...makeDotLayers(20, 0.3, 120))
+  for (const s of starDefs) {
+    const halo = makeStarHalo(s.size)
+    stars.push({ x: s.x, y: s.y, size: s.size, halo, coreColor: s.color })
   }
 
-  // Medium stars
-  const medStars = [
-    { x: 0.25, y: 0.10 },
-    { x: 0.42, y: 0.42 },
-    { x: 0.55, y: 0.35 },
-    { x: 0.78, y: 0.30 },
-    { x: 0.65, y: 0.45 },
-    { x: 0.38, y: 0.15 },
-    { x: 0.48, y: 0.48 },
-  ]
-
-  for (const s of medStars) {
-    objects.push({
-      x: s.x, y: s.y, size: 0.7,
-      type: 'star',
-      brightness: 0.5 + rand(0, 0.2),
-      layers: makeArcLayers(20, [5, 8], rand(0, 0.3), 60),
-    })
-    const star = objects[objects.length - 1]
-    star.layers.push(...makeDotLayers(10, 0.2, 100))
-  }
-
-  // Small stars / star dots
-  const smallStars = [
-    { x: 0.08, y: 0.20 }, { x: 0.22, y: 0.55 },
-    { x: 0.35, y: 0.58 }, { x: 0.58, y: 0.50 },
-    { x: 0.70, y: 0.12 }, { x: 0.85, y: 0.35 },
-    { x: 0.92, y: 0.18 }, { x: 0.15, y: 0.48 },
-    { x: 0.45, y: 0.55 }, { x: 0.75, y: 0.48 },
-    { x: 0.05, y: 0.35 }, { x: 0.60, y: 0.08 },
-    { x: 0.33, y: 0.22 }, { x: 0.88, y: 0.45 },
-    { x: 0.28, y: 0.62 }, { x: 0.53, y: 0.05 },
-  ]
-
-  for (const s of smallStars) {
-    objects.push({
-      x: s.x, y: s.y, size: 0.35,
-      type: 'star',
-      brightness: 0.3 + rand(0, 0.2),
-      layers: makeDotLayers(8, rand(-0.2, 0.4), 90),
+  // ===== FLOW WAVES =====
+  // The sky is filled with flowing wave-like brush strokes
+  // These flow generally left-to-right with sinusoidal undulation
+  for (let i = 0; i < 40; i++) {
+    const yBase = 0.05 + (i / 39) * 0.90  // spread across entire sky
+    const t = i / 39
+    const color = lerpColor(
+      lerpColor(INDIGO, COBALT, t),
+      lerpColor(PRUSSIAN, TEAL, t * 0.5),
+      Math.random() * 0.3
+    )
+    flowWaves.push({
+      yBase,
+      amplitude: 0.015 + rand(0, 0.02),
+      frequency: 2 + rand(-0.5, 1),
+      phase: rand(0, Math.PI * 2),
+      color,
+      alpha: 0.08 + rand(0, 0.08),
+      strokeW: rand(2, 5),
     })
   }
 }
@@ -320,154 +321,111 @@ function initObjects() {
 
 function drawBackground() {
   if (!ctx) return
-  // Gradient sky: dark blue at top, slightly lighter at bottom
-  const grad = ctx.createLinearGradient(0, 0, 0, height)
-  grad.addColorStop(0, '#0a0620')
-  grad.addColorStop(0.4, '#140c35')
-  grad.addColorStop(0.7, '#1a1048')
-  grad.addColorStop(1, '#0d1530')
+  // Gradient: dark indigo at top → slightly lighter blue going down
+  const grad = ctx.createLinearGradient(0, 0, 0, skyH)
+  grad.addColorStop(0, '#0b0a30')
+  grad.addColorStop(0.3, '#100e45')
+  grad.addColorStop(0.6, '#151270')
+  grad.addColorStop(1, '#1a1a55')
   ctx.fillStyle = grad
-  ctx.fillRect(0, 0, width, height)
+  ctx.fillRect(0, 0, width, skyH)
+  // Below sky: dark village silhouette
+  ctx.fillStyle = '#080615'
+  ctx.fillRect(0, skyH, width, height - skyH)
 }
 
-function drawObject(
-  obj: CelestialObject,
-  energy: { bass: number; mid: number; high: number; avg: number }
-) {
+function drawFlowWaves(energy: {bass:number;mid:number;high:number;avg:number}) {
   if (!ctx) return
+  ctx.save()
+  const audioBoost = 1 + energy.avg * 1.5
+  for (const wave of flowWaves) {
+    ctx.beginPath()
+    ctx.strokeStyle = colorStr(wave.color, wave.alpha * (1 + energy.mid * 0.5))
+    ctx.lineWidth = wave.strokeW
+    const yCenter = wave.yBase * skyH
+    const timePhase = th * 0.3 * audioBoost + wave.phase
+    for (let x = 0; x <= width; x += 3) {
+      const xNorm = x / width
+      const y = yCenter + Math.sin(xNorm * Math.PI * wave.frequency + timePhase) * wave.amplitude * skyH
+      if (x === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+  }
+  ctx.restore()
+}
 
-  const cx = obj.x * width
-  const cy = obj.y * height * 0.75  // sky occupies top 75%
-  const baseSize = Math.min(width, height) * 0.02 * obj.size
-
-  // Speed varies by type
-  let speedFactor = 1 / 6
-  if (obj.type === 'vortex') speedFactor = 1 / 4
-  else if (obj.type === 'moon') speedFactor = 1 / 10
-  else if (obj.type === 'star') speedFactor = 1 / 3
-  else if (obj.type === 'milkyway') speedFactor = 1 / 8
-
-  // Energy influence
-  let energyMul = 1
-  if (obj.type === 'vortex') energyMul = 3
-  else if (obj.type === 'moon') energyMul = 1.5
-  else if (obj.type === 'star') energyMul = 2
-
-  const audioBoost = 1 + energy.avg * energyMul
-
+function drawSpiral(cx: number, cy: number, rings: SpiralRing[], energy: {bass:number;mid:number;high:number;avg:number}, extraRotation: number = 0) {
+  if (!ctx) return
   ctx.save()
   ctx.translate(cx, cy)
 
-  for (let i = 0; i < obj.layers.length; i++) {
-    const group = obj.layers[i]
-    const ratio = i / (obj.layers.length + 1)
-    const radius = baseSize * (obj.layers.length * 0.6) * (1 - ratio)
+  for (const ring of rings) {
+    const rotation = th * ring.speed * ring.dir + extraRotation
+    const audioBoost = 1 + energy.bass * 0.5
 
-    // Moon crescent offset
-    let offsetX = 0, offsetY = 0
-    if (obj.type === 'moon') {
-      // Shift inner layers to create crescent illusion
-      const crescentShift = ratio * baseSize * 1.5
-      offsetX = crescentShift * 0.6
-      offsetY = -crescentShift * 0.3
-    }
-
-    for (const seg of group.segments) {
-      const rotation = th * speedFactor * (1 + ratio * 0.5) * seg.dir * audioBoost
-
-      ctx.beginPath()
-      ctx.strokeStyle = colorStr(seg.color, seg.alpha * obj.brightness)
-
-      if (obj.type === 'moon') {
-        // Use thinner strokes for moon, more ethereal
-        ctx.lineWidth = Math.max(0.5, baseSize * 0.15)
-      } else if (obj.type === 'vortex') {
-        ctx.lineWidth = Math.max(0.8, baseSize * 0.2)
-      } else {
-        ctx.lineWidth = Math.max(0.5, baseSize * 0.15 * (1 - ratio))
-      }
-
-      if (seg.startAngle === seg.endAngle) {
-        // Dot
-        ctx.arc(offsetX, offsetY, radius, seg.startAngle + rotation, seg.startAngle + rotation + 0.001)
-      } else {
-        ctx.arc(offsetX, offsetY, radius, seg.startAngle + rotation, seg.endAngle + rotation)
-      }
-      ctx.stroke()
-    }
-  }
-
-  // For bright stars and moon, add a glow center
-  if ((obj.type === 'star' && obj.brightness > 0.7) || obj.type === 'moon') {
-    const glowSize = baseSize * (obj.type === 'moon' ? 0.8 : 0.4)
-    const grad = ctx.createRadialGradient(
-      obj.type === 'moon' ? baseSize * 0.3 : 0,
-      obj.type === 'moon' ? -baseSize * 0.15 : 0,
-      0,
-      obj.type === 'moon' ? baseSize * 0.3 : 0,
-      obj.type === 'moon' ? -baseSize * 0.15 : 0,
-      glowSize
-    )
-    const glowColor = obj.type === 'moon'
-      ? lerpColor(C3, C4, 0.6)
-      : lerpColor(C2, C3, 0.7)
-    grad.addColorStop(0, colorStr(glowColor, 0.6 * obj.brightness))
-    grad.addColorStop(0.5, colorStr(glowColor, 0.15 * obj.brightness))
-    grad.addColorStop(1, colorStr(glowColor, 0))
-    ctx.fillStyle = grad
-    ctx.fillRect(-glowSize, -glowSize, glowSize * 2, glowSize * 2)
+    ctx.beginPath()
+    ctx.strokeStyle = colorStr(ring.color, ring.alpha)
+    ctx.lineWidth = ring.width
+    ctx.arc(0, 0, ring.baseRadius * audioBoost, ring.startAng + rotation, ring.startAng + rotation + ring.sweep)
+    ctx.stroke()
   }
 
   ctx.restore()
 }
 
-// Milky way connecting flow — draw a subtle flowing band between milky way points
-function drawMilkyWayFlow(energy: { bass: number; mid: number; high: number; avg: number }) {
+function drawStar(star: typeof stars[0], energy: {bass:number;mid:number;high:number;avg:number}) {
   if (!ctx) return
+  const cx = star.x * width
+  const cy = star.y * skyH
 
+  // Draw halo rings
+  drawSpiral(cx, cy, star.halo.rings, energy)
+
+  // Draw bright core
   ctx.save()
-  ctx.globalAlpha = 0.15 + energy.avg * 0.1
+  ctx.translate(cx, cy)
+  const coreR = star.size * 4 * (1 + energy.high * 0.3)
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR)
+  grad.addColorStop(0, colorStr(WHITE_YELLOW, 0.9))
+  grad.addColorStop(0.3, colorStr(star.coreColor, 0.5))
+  grad.addColorStop(1, colorStr(star.coreColor, 0))
+  ctx.fillStyle = grad
+  ctx.beginPath()
+  ctx.arc(0, 0, coreR, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
 
-  const milkyWayPoints = [
-    { x: 0.12, y: 0.42 },
-    { x: 0.22, y: 0.38 },
-    { x: 0.32, y: 0.35 },
-    { x: 0.38, y: 0.30 },
-    { x: 0.45, y: 0.28 },
-    { x: 0.52, y: 0.25 },
-    { x: 0.60, y: 0.22 },
-    { x: 0.68, y: 0.20 },
-    { x: 0.75, y: 0.18 },
-    { x: 0.82, y: 0.20 },
-    { x: 0.90, y: 0.25 },
-  ]
+function drawMoon(energy: {bass:number;mid:number;high:number;avg:number}) {
+  if (!ctx) return
+  const cx = 0.82 * width
+  const cy = 0.15 * skyH
 
-  // Draw flowing bezier curves
-  for (let pass = 0; pass < 3; pass++) {
-    ctx.beginPath()
-    const wave = Math.sin(th * 0.3 + pass) * 0.02
-    const startY = milkyWayPoints[0].y * height * 0.75 + wave * height
-    ctx.moveTo(milkyWayPoints[0].x * width, startY)
+  // Draw moon's radiating rings
+  drawSpiral(cx, cy, moonRings, energy)
 
-    for (let i = 1; i < milkyWayPoints.length - 1; i++) {
-      const curr = milkyWayPoints[i]
-      const next = milkyWayPoints[i + 1]
-      const cpx = curr.x * width
-      const cpy = curr.y * height * 0.75 + Math.sin(th * 0.5 + i + pass) * height * 0.02
-      const epx = ((curr.x + next.x) / 2) * width
-      const epy = ((curr.y + next.y) / 2) * height * 0.75 + Math.sin(th * 0.4 + i * 2 + pass) * height * 0.015
-      ctx.quadraticCurveTo(cpx, cpy, epx, epy)
-    }
+  // Draw moon crescent: bright circle shifted to create crescent effect
+  ctx.save()
+  ctx.translate(cx, cy)
 
-    const last = milkyWayPoints[milkyWayPoints.length - 1]
-    ctx.lineTo(last.x * width, last.y * height * 0.75)
+  // Bright core
+  const moonR = Math.min(width, skyH) * 0.015
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, moonR * 2)
+  grad.addColorStop(0, colorStr(WHITE_YELLOW, 0.95))
+  grad.addColorStop(0.5, colorStr(CAD_YELLOW, 0.6))
+  grad.addColorStop(1, colorStr(CAD_YELLOW, 0))
+  ctx.fillStyle = grad
+  ctx.beginPath()
+  ctx.arc(0, 0, moonR * 2, 0, Math.PI * 2)
+  ctx.fill()
 
-    const bandWidth = (15 + pass * 8) * (1 + energy.bass * 0.5)
-    ctx.lineWidth = bandWidth
-    const flowColor = paletteColor(0.3 + pass * 0.15, 0)
-    ctx.strokeStyle = colorStr(flowColor, 0.08 + pass * 0.03)
-    ctx.stroke()
-  }
+  // Crescent: overlay a dark circle offset to the right to create crescent
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.beginPath()
+  ctx.arc(moonR * 0.6, -moonR * 0.2, moonR * 0.85, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.globalCompositeOperation = 'source-over'
 
   ctx.restore()
 }
@@ -478,18 +436,28 @@ function animate() {
 
   drawBackground()
 
-  // Draw milky way connecting flow first (behind everything)
-  drawMilkyWayFlow(energy)
+  // 1. Flow waves (background layer)
+  drawFlowWaves(energy)
 
-  // Sort: draw milkyway first, then vortex, then stars, then moon on top
-  const order = { milkyway: 0, vortex: 1, star: 2, moon: 3 }
-  const sorted = [...objects].sort((a, b) => order[a.type] - order[b.type])
+  // 2. Main vortex (center of the painting)
+  const vortexCX = 0.35 * width
+  const vortexCY = 0.40 * skyH
+  drawSpiral(vortexCX, vortexCY, mainVortex, energy)
 
-  for (const obj of sorted) {
-    drawObject(obj, energy)
+  // 3. Secondary vortex
+  const vortex2CX = 0.62 * width
+  const vortex2CY = 0.28 * skyH
+  drawSpiral(vortex2CX, vortex2CY, secondaryVortex, energy)
+
+  // 4. Stars with halos
+  for (const star of stars) {
+    drawStar(star, energy)
   }
 
-  th += 0.008 * (1 + energy.avg * 0.5)
+  // 5. Moon (topmost layer)
+  drawMoon(energy)
+
+  th += 0.006 * (1 + energy.avg * 0.5)
   animId = requestAnimationFrame(animate)
 }
 
@@ -500,7 +468,8 @@ function resize() {
   height = window.innerHeight
   canvas.width = width
   canvas.height = height
-  initObjects()
+  skyH = height * 0.65
+  initScene()
 }
 
 onMounted(() => {
@@ -521,7 +490,7 @@ onUnmounted(() => {
 
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box }
-html, body { overflow: hidden; background: #0a0620 }
+html, body { overflow: hidden; background: #0b0a30 }
 .app { position: relative; width: 100vw; height: 100vh }
 canvas { display: block; width: 100%; height: 100% }
 
